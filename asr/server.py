@@ -130,12 +130,14 @@ async def asr_socket(ws: WebSocket):
         # Drena pré-buffer em frames de 20ms
         frame_bytes = int(cfg["sample_rate"]*0.02)*2
         usable = len(prebuf) - (len(prebuf)%frame_bytes)
+        pending = bytearray()
         if usable > 0:
             mem = memoryview(prebuf)[:usable]
             for i in range(0, usable, frame_bytes):
                 out = seg.push(mem[i:i+frame_bytes].tobytes())
                 if out:
                     await handle_segment(ws, out, cfg["language"])
+        pending.extend(prebuf[usable:])
 
         # Loop principal
         while True:
@@ -175,14 +177,17 @@ async def asr_socket(ws: WebSocket):
                         pass
 
             elif m.get("bytes"):
-                b = m["bytes"]
+                pending.extend(m["bytes"])
+                b = pending
                 usable = len(b) - (len(b)%frame_bytes)
-                if usable <= 0: continue
+                if usable <= 0:
+                    continue
                 mem = memoryview(b)[:usable]
                 for i in range(0, usable, frame_bytes):
                     out = seg.push(mem[i:i+frame_bytes].tobytes())
                     if out:
                         await handle_segment(ws, out, cfg["language"])
+                pending = bytearray(b[usable:])
 
     except Exception as e:
         log.exception("asr_ws_error")
