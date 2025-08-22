@@ -1,0 +1,124 @@
+version: "3.9"
+services:
+
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    environment:
+      - TZ=America/Sao_Paulo
+      - N_GPU_LAYERS=0
+      - MODEL=Phi-3-mini-4k-instruct-Q4_K_M.gguf
+      - N_GPU_LAYERS=0
+    volumes:
+      - ./services-data/llama/models:/models:ro
+      - ./services-data/llama/models/Phi-3-mini-4k-instruct-Q4_K_M.gguf:/models/Phi-3-mini-4k-instruct-Q4_K_M.gguf:ro
+    command: >
+      -m /models/Phi-3-mini-4k-instruct-Q4_K_M.gguf
+      --host 0.0.0.0
+      --port 8080
+      --ctx-size 8192
+      --parallel 2
+      --mlock
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - net
+
+  # llama:
+    # image: ghcr.io/ggerganov/llama.cpp:full
+    # environment:
+    #   - TZ=America/Sao_Paulo
+    #   - N_GPU_LAYERS=0
+    #   - MODEL=Phi-3-mini-4k-instruct-Q4_K_M.gguf
+    #   - N_GPU_LAYERS=0
+    # command: ["--host","0.0.0.0","--port","8080","-m","/models/Phi-3-mini-4k-instruct-Q4_K_M.gguf","-c","8192","--parallel","2","--chat"]
+    # command: >
+    #   -m /models/Phi-3-mini-4k-instruct-Q4_K_M.gguf
+    #   --host 0.0.0.0
+    #   --port 8080
+    #   --ctx-size 8192
+    #   --parallel 2
+    #   --mlock
+    # command: ["--host", "0.0.0.0", "--port", "8080", "-m", "/models/Phi-3-mini-4k-instruct-Q4_K_M.gguf", "-c", "8192", "--parallel", "2", "--mlock"]
+
+    # ports: ["8080:8080"]
+    # volumes:
+    #   - ./services-data/llama/models:/models:ro
+    #   - ./services-data/llama/models/Phi-3-mini-4k-instruct-Q4_K_M.gguf:/models/Phi-3-mini-4k-instruct-Q4_K_M.gguf:ro
+    # networks: ["net"]
+
+  # piper:
+  #   image: rhasspy/wyoming-piper:latest
+  #   command: ["--voice","pt_BR-faber-medium","--host","0.0.0.0","--port","10200"]
+  #   ports: ["10200:10200"]
+  #   volumes:
+  #     - ./models/piper:/data
+  #   networks: ["net"]
+
+  piper:
+    image: rhasspy/wyoming-piper:latest
+    command: ["--voice", "pt_BR-faber-medium"]
+    ports:
+      - "10200:10200"   # protocolo Wyoming (TCP)
+      - "5000:5000"     # HTTP opcional exposto pela imagem
+    volumes:
+      - ./services-data/piper:/data
+    networks:
+      - net
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/10200' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5        
+
+  gateway:
+    build: ./gateway
+    ports: [ "4000:4000" ]
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - ASR_URL=ws://asr:9000/asr
+      - LLAMA_URL=http://llama:8080/v1/chat/completions
+      - MEM_TURNS=4
+      - PIPER_WYOMING_URL=ws://piper:10200
+    depends_on:
+      - asr
+      - llama
+      - piper
+    networks: [ "net" ]
+
+  asr:
+    build: ./asr
+    ports: [ "9000:9000" ]
+    environment:
+      - LOG_LEVEL=INFO
+      - ASR_LANG=pt
+      - ASR_MODEL=base
+      - ASR_EAGER_LOAD=true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    networks: [ "net" ]
+
+  frontend:
+    build: ./frontend
+    ports: [ "3000:3000" ]
+    environment:
+      - NEXT_PUBLIC_GATEWAY_URL=http://localhost:4000
+      - NEXT_PUBLIC_TTS_MODE=wyoming   # mude para wyoming para usar Piper via gateway - browser
+    
+    depends_on:
+      - gateway
+    networks: [ "net" ]
+
+networks:
+  net: {}
+
+

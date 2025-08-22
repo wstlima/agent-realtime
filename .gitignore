@@ -1,0 +1,11 @@
+frontend/package-lock.json
+/services-data
+/models
+/node_modules
+/.next
+/.vercel
+/.cache
+/.turbo
+/.idea
+/.vscode
+/.DS_Store
