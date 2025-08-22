@@ -40,3 +40,38 @@ def _assert_detects(sr: int):
 def test_segmenter_detects_8kHz_and_16kHz():
     _assert_detects(8000)
     _assert_detects(16000)
+
+
+def test_segmenter_irregular_block_sizes():
+    sr = 16000
+    seg = Segmenter(sr=sr)
+    pcm = generate_pcm(sr)
+    frame_bytes = seg.frame_bytes
+    # split pcm into irregular chunks not aligned to frame_bytes
+    chunk_sizes = [1000, 1500, 700, 3500, 900]
+    # ensure remaining bytes are included as final chunk
+    remaining = len(pcm) - sum(chunk_sizes)
+    if remaining > 0:
+        chunk_sizes.append(remaining)
+
+    pending = bytearray()
+    out = None
+    offset = 0
+    for size in chunk_sizes:
+        chunk = pcm[offset:offset + size]
+        pending.extend(chunk)
+        offset += size
+        usable = len(pending) - (len(pending) % frame_bytes)
+        if usable > 0:
+            mem = memoryview(pending)[:usable]
+            for i in range(0, usable, frame_bytes):
+                out = seg.push(mem[i:i + frame_bytes].tobytes())
+                if out is not None:
+                    break
+            pending = bytearray(pending[usable:])
+        if out is not None:
+            break
+
+    assert out is not None
+    audio = np.frombuffer(out, dtype=np.int16)
+    assert np.max(np.abs(audio)) > 0
