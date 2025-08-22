@@ -4,6 +4,7 @@ import WebSocket from 'ws'
 const ASR_URL = process.env.ASR_URL || 'ws://localhost:9000/asr'
 const PREBUFFER_CAP_BYTES = 64 * 1024 // ~2s @16k PCM16
 const HEARTBEAT_MS = 30000
+const SILENCE_FLUSH_MS = Number(process.env.SILENCE_FLUSH_MS || 1000)
 
 function toBuffer(data) {
   if (Buffer.isBuffer(data)) return data
@@ -28,6 +29,19 @@ export default async function (fastify) {
     let started = false
     const prebuf = []
     let prebufSize = 0
+    let silenceTimer
+
+    function resetSilenceTimer() {
+      if (silenceTimer) clearTimeout(silenceTimer)
+      silenceTimer = setTimeout(() => {
+        silenceTimer = undefined
+        try {
+          if (upstream && upstream.readyState === WebSocket.OPEN) {
+            upstream.send(JSON.stringify({ op: 'flush' }))
+          }
+        } catch {}
+      }, SILENCE_FLUSH_MS)
+    }
 
     const hb = setInterval(() => {
       try { if (client && client.readyState === WebSocket.OPEN) client.ping() } catch {}
@@ -87,11 +101,13 @@ export default async function (fastify) {
           const head = prebuf.shift()
           if (head) prebufSize -= head.length
         }
+        resetSilenceTimer()
         return
       }
       try { upstream.send(data, { binary: !(typeof data === 'string') }) } catch (err) {
         fastify.log.error({ reqId, err }, 'asrStream forward-to-upstream failed')
       }
+      resetSilenceTimer()
     })
 
     client.on('close', (code, reason) => {
@@ -105,12 +121,14 @@ export default async function (fastify) {
         try { upstream?.close(code, reason?.toString?.()) } catch {}
       }, 40)
       clearInterval(hb)
+      if (silenceTimer) clearTimeout(silenceTimer)
     })
 
     client.on('error', (err) => {
       fastify.log.error({ reqId, err }, 'client_error')
       try { upstream?.close(1011, 'client_error') } catch {}
       clearInterval(hb)
+      if (silenceTimer) clearTimeout(silenceTimer)
     })
   })
 }
