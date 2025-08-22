@@ -55,7 +55,7 @@ class Segmenter:
             return None
         is_speech = False
         try:
-            is_speech = self.vad.is_speech(frame, sample_rate=16000)
+            is_speech = self.vad.is_speech(frame, sample_rate=self.sr)
         except Exception:
             pass
         if not self.in_speech:
